@@ -1,0 +1,16 @@
+spring:
+  application:
+    name: probeService
+  datasource:
+    initialization-mode: never
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost:5432}/${POSTGRES_DB:ptc}?currentSchema=${POSTGRES_SCHEMA:nitrojob}
+    username: ${POSTGRES_USER:ptc}
+    password: ${POSTGRES_PASSWORD:ptc}
+    maxActive: 5
+  jpa:
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
