@@ -10,7 +10,47 @@ Note that, in the `application.yaml` config, the sql logging is turned on, to al
 
 For most cases, there's a `/bad` and a `/good` endpoint to try. Be sure to follow the logs and see what happens.
 
-## N+1 problem
+# A few forward guidelines
+
+## Design for big data
+
+Always assume the data in a DB is much larger than your RAM, even if it currently is not.
+
+If the requirement is to see ALL invoices in a table, in the UI, simply fetching ALL invoices is not a solution.
+Even if it works now, assume that it will either be a very long operation, or it will throw an Out Of Memory exception.
+
+The immediate solution is to use __pagination__. It is built into the Spring Data JPA.
+
+This does not, however, work all the time. A requirement may be, for example, to update all items in a table.
+
+## Data operations (filtering, sorting, modifying) are best done by the DB, not by the client
+
+A common anti-pattern is `query All - process - save back`, or `query All - filter - sort`. 
+
+The only situation where this is a valid pattern is when the `process` part depends on a complex (non-serializable) application state, or on a dependent library.
+In general, when the processing cannot be done by the DB.
+
+Otherwise, it has several massive disadvantages:
+
+- in the simplest case, it makes two round trips to the DB (query + save)
+- ... but the size of data transferred is relatively big
+- ... and, unless batched, it is all loaded in RAM
+- processing / filtering is done on a collection with a generic implementation
+- ... as opposed to a specialized data structure with advanced capabilities engineered specifically for those purposes
+
+## Always filter based on indexed columns (add indexes where necessary)
+
+An application is likely to have a rather limited amount of queries for its operations.
+Make sure the filter conditions are backed by indexes.
+
+Feel free to run your queries on the DB with an `explain` clause, or whatever that DB uses for query analysis.
+Non-indexed conditions will show with a much higher cost than the others and will be described as `full table scan` or similar.
+
+## Round trips to the DB are expensive (often more so than the queries themselves)
+
+The goal is to minimize the amount of DB requests necessary to perform a certain task.
+
+### N+1 problem
 
 In the example, you've got a relationship between `Invoice` and `InvoiceItem`.
 
@@ -27,17 +67,16 @@ There are two solutions to that:
 - `JOIN FETCH` -- [doc here](https://www.logicbig.com/tutorials/java-ee-tutorial/jpa/fetch-join.html)
 - `@NamedEntityGraph` -- [doc here](https://thoughts-on-java.org/jpa-21-entity-graph-part-1-named-entity/)
 
-## Serialization quagmire
+Unfortunately, none of the two solutions work with pagination, if you're using Hibernate.
 
-A lot of unit testing on services doesn't take into account the serialization part, simply because we all assume Spring will take care of that automatically -- which, in most cases, it does.
+This leaves you with four solutions:
 
-### The stack overflow
-
-Having the bidirectional `Invoice`-`InvoiceItem` relationship, without any additional intervention, will lead to a stack overflow when serving a web request (i.e. performing Jackson serialization).
-
-Why is that? it's quite simple actually: an `Invoice` has a collection `InvoiceItem`; each `InvoiceItem` has its parent `Invoice`, etc.
-
-There are multiple solutions to that -- [doc here](https://www.baeldung.com/jackson-bidirectional-relationships-and-infinite-recursion)
+- Accept the N+1 problem, because you'll only fetch one page
+- Make the `items` field lazy, by setting `fetch = FetchType.LAZY` to the `@OneToMany` annotation (this is the default) -- but lose the sub-collection in the returned object
+- Make two queries and stitch them together:
+  - one query to fetch the `Invoice` result
+  - the second query to fetch the `InvoiceItem` objects with a filter condition to have the FK within the ids returned by the first query
+- Make a single query with `join` -- but you'll need to reconstruct the entities manually
 
 ### The not-so-lazy field
 
@@ -51,6 +90,14 @@ does: it calls the getter fields.
 
 To prevent it from getting queried, you can use `@JsonIgnore` or the `@JsonView` 
 stack on it.
+
+### The stack overflow
+
+Having the bidirectional `Invoice`-`InvoiceItem` relationship, without any additional intervention, will lead to a stack overflow when serving a web request (i.e. performing Jackson serialization).
+
+Why is that? it's quite simple actually: an `Invoice` has a collection `InvoiceItem`; each `InvoiceItem` has its parent `Invoice`, etc.
+
+There are multiple solutions to that -- [doc here](https://www.baeldung.com/jackson-bidirectional-relationships-and-infinite-recursion)
 
 ## Updates in Java
 

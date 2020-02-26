@@ -50,7 +50,7 @@ public class Invoice {
     @JsonView(InvoiceView.ShortView.class)
     private ZonedDateTime dueDate;
 
-    @OneToMany(targetEntity = InvoiceItem.class)
+    @OneToMany(targetEntity = InvoiceItem.class, fetch = FetchType.LAZY)
     @JoinColumn(name = "invoice")
     private List<InvoiceItem> items;
 }
